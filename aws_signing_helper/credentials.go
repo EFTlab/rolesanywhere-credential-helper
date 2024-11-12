@@ -18,6 +18,8 @@ import (
 type CredentialsOpts struct {
 	PrivateKeyId        string
 	CertificateId       string
+	PrivateKeyPem       string
+	CertificatePem      string
 	CertificateBundleId string
 	CertIdentifier      CertIdentifier
 	RoleArn             string

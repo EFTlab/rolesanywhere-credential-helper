@@ -26,6 +26,8 @@ var (
 
 	certificateId       string
 	privateKeyId        string
+	certificatePem      string
+	privateKeyPem       string
 	certificateBundleId string
 	certSelector        string
 	systemStoreName     string
@@ -67,6 +69,8 @@ func initCredentialsSubCommand(subCmd *cobra.Command) {
 	subCmd.PersistentFlags().BoolVar(&debug, "debug", false, "To print debug output")
 	subCmd.PersistentFlags().StringVar(&certificateId, "certificate", "", "Path to certificate file")
 	subCmd.PersistentFlags().StringVar(&privateKeyId, "private-key", "", "Path to private key file")
+	subCmd.PersistentFlags().StringVar(&certificatePem, "certificate-pem", "", "Certificate PEM value")
+	subCmd.PersistentFlags().StringVar(&privateKeyPem, "private-key-pem", "", "Private key PEM value")
 	subCmd.PersistentFlags().StringVar(&certificateBundleId, "intermediates", "", "Path to intermediate certificate bundle file")
 	subCmd.PersistentFlags().StringVar(&certSelector, "cert-selector", "", "JSON structure to identify a certificate from a certificate store. "+
 		"Can be passed in either as string or a file name (prefixed by \"file://\")")
@@ -79,7 +83,7 @@ func initCredentialsSubCommand(subCmd *cobra.Command) {
 	subCmd.PersistentFlags().StringVar(&tpmKeyPassword, "tpm-key-password", "", "Password for TPM key, if applicable")
 	subCmd.PersistentFlags().BoolVar(&noTpmKeyPassword, "no-tpm-key-password", false, "Required if the TPM key has no password and"+
 		"a handle is used to refer to the key")
-	subCmd.PersistentFlags().StringVar(&roleSessionName, "role-session-name", "", "An identifier of a role session")	
+	subCmd.PersistentFlags().StringVar(&roleSessionName, "role-session-name", "", "An identifier of a role session")
 
 	subCmd.MarkFlagsMutuallyExclusive("certificate", "cert-selector")
 	subCmd.MarkFlagsMutuallyExclusive("certificate", "system-store-name")
@@ -240,6 +244,8 @@ func PopulateCredentialsOptions() error {
 	credentialsOptions = helper.CredentialsOpts{
 		PrivateKeyId:        privateKeyId,
 		CertificateId:       certificateId,
+		PrivateKeyPem:       privateKeyPem,
+		CertificatePem:      certificatePem,
 		CertificateBundleId: certificateBundleId,
 		CertIdentifier:      certIdentifier,
 		RoleArn:             roleArnStr,

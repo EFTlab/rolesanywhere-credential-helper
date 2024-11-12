@@ -283,27 +283,42 @@ func encodeEcdsaSigValue(signature []byte) (out []byte, err error) {
 
 // GetSigner gets the Signer based on the flags passed in by the user (from which the CredentialsOpts structure is derived)
 func GetSigner(opts *CredentialsOpts) (signer Signer, signatureAlgorithm string, err error) {
+	if opts.CertificateId != "" && opts.CertificatePem != "" {
+		return nil, "", errors.New("CertificateId or CertificatePem can be specified, not both")
+	}
+	if opts.PrivateKeyId != "" && opts.PrivateKeyPem != "" {
+		return nil, "", errors.New("PrivateKeyId or PrivateKeyPem can be specified, not both")
+	}
+
 	var (
 		certificate      *x509.Certificate
 		certificateChain []*x509.Certificate
 	)
 
 	privateKeyId := opts.PrivateKeyId
-	if privateKeyId == "" {
-		if opts.CertificateId == "" {
+	privateKeyPem := opts.PrivateKeyPem
+	if privateKeyId == "" && privateKeyPem == "" {
+		if opts.CertificateId == "" && opts.CertificatePem == "" {
 			if Debug {
 				log.Println("attempting to use CertStoreSigner")
 			}
 			return GetCertStoreSigner(opts.CertIdentifier)
 		}
 		privateKeyId = opts.CertificateId
+		privateKeyPem = opts.CertificatePem
 	}
 
-	if opts.CertificateId != "" && !strings.HasPrefix(opts.CertificateId, "pkcs11:") {
-		_, cert, err := ReadCertificateData(opts.CertificateId)
+	if (opts.CertificateId != "" || opts.CertificatePem != "") && !strings.HasPrefix(opts.CertificateId, "pkcs11:") {
+		var cert *x509.Certificate
+		var err error
+		if opts.CertificateId != "" {
+			_, cert, err = ReadCertificateData(opts.CertificateId)
+		} else if opts.CertificatePem != "" {
+			_, cert, err = ReadCertificateDataBytes([]byte(opts.CertificatePem))
+		}
 		if err == nil {
 			certificate = cert
-		} else if opts.PrivateKeyId == "" {
+		} else if opts.PrivateKeyId == "" && opts.PrivateKeyPem == "" {
 			if Debug {
 				log.Println("not a PEM certificate, so trying PKCS#12")
 			}
@@ -353,7 +368,13 @@ func GetSigner(opts *CredentialsOpts) (signer Signer, signatureAlgorithm string,
 			},
 		)
 	} else {
-		tpmKey, err := parseDERFromPEM(privateKeyId, "TSS2 PRIVATE KEY")
+		var tpmKey *pem.Block
+		var err error
+		if privateKeyId != "" {
+			tpmKey, err = parseDERFromPEM(privateKeyId, "TSS2 PRIVATE KEY")
+		} else if privateKeyPem != "" {
+			tpmKey, err = parseDERFromPEMbytes([]byte(privateKeyPem), "TSS2 PRIVATE KEY")
+		}
 		if err == nil {
 			if Debug {
 				log.Println("attempting to use TPMv2Signer")
@@ -370,7 +391,11 @@ func GetSigner(opts *CredentialsOpts) (signer Signer, signatureAlgorithm string,
 			)
 		}
 
-		_, err = ReadPrivateKeyData(privateKeyId)
+		if privateKeyId != "" {
+			_, err = ReadPrivateKeyData(privateKeyId)
+		} else if privateKeyPem != "" {
+			_, err = ReadPrivateKeyDataBytes([]byte(privateKeyPem))
+		}
 		if err != nil {
 			return nil, "", err
 		}
@@ -381,7 +406,12 @@ func GetSigner(opts *CredentialsOpts) (signer Signer, signatureAlgorithm string,
 		if Debug {
 			log.Println("attempting to use FileSystemSigner")
 		}
-		return GetFileSystemSigner(privateKeyId, opts.CertificateId, opts.CertificateBundleId, false)
+		if privateKeyId != "" && opts.CertificateId != "" {
+			return GetFileSystemSigner(privateKeyId, opts.CertificateId, opts.CertificateBundleId, false)
+		} else if privateKeyPem != "" && opts.CertificatePem != "" {
+			return GetMemorySigner(privateKeyPem, opts.CertificatePem, opts.CertificateBundleId, false)
+		}
+		return nil, "", errors.New("No data")
 	}
 }
 
@@ -638,10 +668,13 @@ func parseDERFromPEM(pemDataId string, blockType string) (*pem.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseDERFromPEMbytes(bytes, blockType)
+}
 
+func parseDERFromPEMbytes(pemData []byte, blockType string) (*pem.Block, error) {
 	var block *pem.Block
-	for len(bytes) > 0 {
-		block, bytes = pem.Decode(bytes)
+	for len(pemData) > 0 {
+		block, pemData = pem.Decode(pemData)
 		if block == nil {
 			return nil, errors.New("unable to parse PEM data")
 		}
@@ -681,7 +714,18 @@ func readECPrivateKey(privateKeyId string) (ecdsa.PrivateKey, error) {
 	if err != nil {
 		return ecdsa.PrivateKey{}, errors.New("could not parse PEM data")
 	}
+	return parsePrivateKeyBlock(block)
+}
 
+func readECPrivateKeyBytes(privateKeyData []byte) (ecdsa.PrivateKey, error) {
+	block, err := parseDERFromPEMbytes(privateKeyData, "EC PRIVATE KEY")
+	if err != nil {
+		return ecdsa.PrivateKey{}, errors.New("could not parse PEM data")
+	}
+	return parsePrivateKeyBlock(block)
+}
+
+func parsePrivateKeyBlock(block *pem.Block) (ecdsa.PrivateKey, error) {
 	privateKey, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		return ecdsa.PrivateKey{}, errors.New("could not parse private key")
@@ -696,6 +740,19 @@ func readRSAPrivateKey(privateKeyId string) (rsa.PrivateKey, error) {
 		return rsa.PrivateKey{}, errors.New("could not parse PEM data")
 	}
 
+	return parseRSAPrivateKeyBlock(block)
+}
+
+func readRSAPrivateKeyBytes(privateKeyData []byte) (rsa.PrivateKey, error) {
+	block, err := parseDERFromPEMbytes(privateKeyData, "RSA PRIVATE KEY")
+	if err != nil {
+		return rsa.PrivateKey{}, errors.New("could not parse PEM data")
+	}
+
+	return parseRSAPrivateKeyBlock(block)
+}
+
+func parseRSAPrivateKeyBlock(block *pem.Block) (rsa.PrivateKey, error) {
 	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
 		return rsa.PrivateKey{}, errors.New("could not parse private key")
@@ -709,7 +766,18 @@ func readPKCS8PrivateKey(privateKeyId string) (crypto.PrivateKey, error) {
 	if err != nil {
 		return nil, errors.New("could not parse PEM data")
 	}
+	return parsePKCS8PrivateKeyBlock(block)
+}
 
+func readPKCS8PrivateKeyBytes(privateKeyData []byte) (crypto.PrivateKey, error) {
+	block, err := parseDERFromPEMbytes(privateKeyData, "PRIVATE KEY")
+	if err != nil {
+		return nil, errors.New("could not parse PEM data")
+	}
+	return parsePKCS8PrivateKeyBlock(block)
+}
+
+func parsePKCS8PrivateKeyBlock(block *pem.Block) (crypto.PrivateKey, error) {
 	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return nil, errors.New("could not parse private key")
@@ -737,20 +805,23 @@ func readPKCS8PrivateKey(privateKeyId string) (crypto.PrivateKey, error) {
 // certificates in the chain aren't guaranteed (it's also not guaranteed that
 // those certificates form a chain with the end-entity certificat either).
 func ReadPKCS12Data(certificateId string) (certChain []*x509.Certificate, privateKey crypto.PrivateKey, err error) {
+	bytes, err := os.ReadFile(certificateId)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return ReadPKCS12DataBytes(bytes)
+}
+
+func ReadPKCS12DataBytes(certificate []byte) (certChain []*x509.Certificate, privateKey crypto.PrivateKey, err error) {
 	var (
-		bytes               []byte
 		pemBlocks           []*pem.Block
 		parsedCerts         []*x509.Certificate
 		certMap             map[string]*x509.Certificate
 		endEntityFoundIndex int
 	)
 
-	bytes, err = os.ReadFile(certificateId)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	pemBlocks, err = pkcs12.ToPEM(bytes, "")
+	pemBlocks, err = pkcs12.ToPEM(certificate, "")
 	if err != nil {
 		return nil, "", err
 	}
@@ -820,6 +891,23 @@ func ReadPrivateKeyData(privateKeyId string) (crypto.PrivateKey, error) {
 	return nil, errors.New("unable to parse private key")
 }
 
+// Load the private key referenced by `privateKeyId`.
+func ReadPrivateKeyDataBytes(privateKeyData []byte) (crypto.PrivateKey, error) {
+	if key, err := readPKCS8PrivateKeyBytes(privateKeyData); err == nil {
+		return key, nil
+	}
+
+	if key, err := readECPrivateKeyBytes(privateKeyData); err == nil {
+		return key, nil
+	}
+
+	if key, err := readRSAPrivateKeyBytes(privateKeyData); err == nil {
+		return key, nil
+	}
+
+	return nil, errors.New("unable to parse private key")
+}
+
 // Reads private key data from a *pem.Block.
 func ReadPrivateKeyDataFromPEMBlock(block *pem.Block) (key crypto.PrivateKey, err error) {
 	key, err = x509.ParseECPrivateKey(block.Bytes)
@@ -842,7 +930,20 @@ func ReadCertificateData(certificateId string) (CertificateData, *x509.Certifica
 	if err != nil {
 		return CertificateData{}, nil, errors.New("could not parse PEM data")
 	}
+	return parseCertificateBlock(block)
+}
 
+// ReadCertificateData loads the certificate referenced by `certificateId` and extracts
+// details required by the SDK to construct the StringToSign.
+func ReadCertificateDataBytes(certificateData []byte) (CertificateData, *x509.Certificate, error) {
+	block, err := parseDERFromPEMbytes(certificateData, "CERTIFICATE")
+	if err != nil {
+		return CertificateData{}, nil, errors.New("could not parse PEM data")
+	}
+	return parseCertificateBlock(block)
+}
+
+func parseCertificateBlock(block *pem.Block) (CertificateData, *x509.Certificate, error) {
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		return CertificateData{}, nil, errors.New("could not parse certificate")
