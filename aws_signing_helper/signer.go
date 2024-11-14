@@ -633,8 +633,16 @@ func encodeDer(der []byte) (string, error) {
 	return buf.String(), nil
 }
 
-func parseDERFromPEM(pemDataId string, blockType string) (*pem.Block, error) {
+func readFileOrPemVariable(pemDataId string) ([]byte, error) {
 	bytes, err := os.ReadFile(pemDataId)
+	if !errors.Is(err, os.ErrNotExist) || !strings.HasPrefix(pemDataId, "---") {
+		return bytes, err
+	}
+	return []byte(pemDataId), nil
+}
+
+func parseDERFromPEM(pemDataId string, blockType string) (*pem.Block, error) {
+	bytes, err := readFileOrPemVariable(pemDataId)
 	if err != nil {
 		return nil, err
 	}
