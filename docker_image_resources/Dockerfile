@@ -5,6 +5,7 @@ FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2023.9.20
 # Add build arguments
 ARG TARGETARCH
 ARG VERSION
+ARG GO_VERSION=1.26.2
 
 # Install build dependencies
 RUN dnf install -y \
@@ -17,10 +18,10 @@ ENV GOPATH=/root/go \
     HOME=/root
  
 RUN mkdir -p /root/go/bin && \
-    go install golang.org/dl/go1.26.1@latest && \
-    go1.26.1 download && \
+    go install golang.org/dl/go${GO_VERSION}@latest && \
+    go${GO_VERSION} download && \
     rm -rf /usr/local/go && \
-    ln -s /root/sdk/go1.26.1 /usr/local/go
+    ln -s /root/sdk/go${GO_VERSION} /usr/local/go
  
 ENV GOROOT=/usr/local/go \
     PATH=/usr/local/go/bin:/root/go/bin:$PATH
